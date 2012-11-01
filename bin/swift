@@ -869,9 +869,10 @@ def st_upload(parser, args, print_queue, error_queue):
         error_queue.put('Usage: %s [options] %s' %
                         (basename(argv[0]), st_upload_help))
         return
-    if (options.verified_upload or options.no_clobber and options.changed ) or\
-       (options.verified_upload and options.no_clobber):
-        error_queue.put('Incompatabe options Usage: %s [options] %s' %
+    if ((options.verified_upload or options.no_clobber) and 
+         options.changed ) or\
+        (options.verified_upload and options.no_clobber):
+        error_queue.put('Incompatible options Usage: %s [options] %s' %
                         (basename(argv[0]), st_upload_help))
         return
     object_queue = Queue(10000)
