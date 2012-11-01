@@ -861,7 +861,8 @@ def st_upload(parser, args, print_queue, error_queue):
     parser.add_option('--no-clobber', action='store_true', 
                        dest='no_clobber',
                        default=False, 
-                       help='If the file exists in the container, skip it.')
+                       help='If the file exists in the container, do not' 
+                            ' skip it and do not upload.')
     (options, args) = parse_args(parser, args)
     args = args[1:]
     if len(args) < 2:
@@ -939,6 +940,8 @@ def st_upload(parser, args, print_queue, error_queue):
                         mt = headers.get('x-object-meta-mtime')
                         if options.changed and cl == getsize(path) and \
                                 mt == put_headers['x-object-meta-mtime']:
+                            if options.verbose:
+                                print_queue.put('No change %s' % path)
                             return
                         if not options.leave_segments:
                             old_manifest = headers.get('x-object-manifest')
@@ -1078,6 +1081,7 @@ def st_upload(parser, args, print_queue, error_queue):
         if not names:
             object_queue.put({'path': path, 'dir_marker': True})
         else:
+            sorted(names)
             for name in listdir(path):
                 subpath = join(path, name)
                 if isdir(subpath):
