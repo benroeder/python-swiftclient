@@ -20,7 +20,8 @@ from errno import EEXIST, ENOENT
 from hashlib import md5
 from optparse import OptionParser, SUPPRESS_HELP
 from os import environ, listdir, makedirs, utime, _exit as os_exit
-from os.path import basename, dirname, getmtime, getsize, isdir, join, exists as path_exists
+from os.path import basename, dirname, getmtime, getsize, isdir, join
+from os.path import exists as path_exists
 from Queue import Empty, Queue
 from random import shuffle
 from sys import argv, exc_info, exit, stderr, stdout
@@ -50,6 +51,14 @@ def mkdirs(path):
     except OSError, err:
         if err.errno != EEXIST:
             raise
+            
+def _read_in_chunks(file_obj, chunk_size=1024*1024*32):
+    while True:
+        data = file_obj.read(chunk_size)
+        if not data:
+            break
+        yield data
+
 
 
 def put_errors_from_threads(threads, error_queue):
@@ -333,13 +342,17 @@ def st_download(parser, args, print_queue, error_queue):
                       default=False, help="Perform download(s), but don't "
                       "actually write anything to disk")
     parser.add_option('', '--no-clobber', action='store_true', dest='noclobber',
-                      default=False, help="Do not overwrite if file already exists")
-    parser.add_option('', '--verified-overwrite', action='store_true', dest='verifiedoverwrite',
-                      default=False, help="If file exists, check the checksum, download and overwrite "
-                      "if different")
+                      default=False, help="Do not overwrite if file already "
+                      "exists")
+    parser.add_option('', '--verified-overwrite', 
+                      action='store_true', dest='verifiedoverwrite',
+                      default=False, 
+                      help="If file exists, check the checksum, download and "
+                      "overwrite if different")
     parser.add_option('', '--seq', action='store_true', dest='seq_download',
-                      default=False, help="Sort the container before adding to queue so download in"
-                      " order")
+                      default=False, 
+                      help="Sort the container before adding to queue so "
+                      "download in order")
 
     (options, args) = parse_args(parser, args)
     args = args[1:]
@@ -352,15 +365,7 @@ def st_download(parser, args, print_queue, error_queue):
                         (basename(argv[0]), st_download_help))
         return
 
-    object_queue = Queue(10000)
-    
-    def _read_in_chunks(file_obj, chunk_size=1024):
-        while True:
-            data = file_obj.read(chunk_size)
-            if not data:
-                break
-            yield data
-    
+    object_queue = Queue(10000)    
 
     def _download_object(queue_arg, conn):
         if len(queue_arg) == 2:
@@ -381,30 +386,38 @@ def st_download(parser, args, print_queue, error_queue):
                             verify_header_receipt = time()
                             md5sum_remote = headers['etag']
                             md5sum_file = md5()
-                            localfile = open(obj,'r')
-                            chunksize = 1024*1024*4 
+                            localfile = open(obj,'r') 
                             read_length = 0
-                            for chunk in _read_in_chunks(localfile,chunksize):
+                            for chunk in _read_in_chunks(localfile):
                                 read_length = len(chunk)
                                 md5sum_file.update(chunk)
                             verify_finish_time = time()
-                            verify_time_str = 'headers %.3fs, total %.3fs, %.3fs MB/s' % (
-                                              verify_header_receipt - verify_start_time, 
-                                              verify_finish_time - verify_start_time,
-                                              float(read_length) / (verify_finish_time - 
+                            verify_time_str = 'headers %.3fs, total %.3fs,'\
+                                              ' %.3fs MB/s' % (
+                                              verify_header_receipt - 
+                                              verify_start_time, 
+                                              verify_finish_time - 
+                                              verify_start_time,
+                                              float(read_length) / 
+                                              (verify_finish_time - 
                                               verify_start_time) / 1000000)              
                             
                             #if matching skip
                             if md5sum_remote == md5sum_file.hexdigest():
                                 if options.verbose:
-                                    print_queue.put(obj +' [ Verified Skipping %s ] %s ' % \
-                                    ( md5sum_remote, verify_time_str))
+                                    print_queue.put(obj + \
+                                                   ' [ Verified Skipping %s ] '
+                                                   '%s ' % ( md5sum_remote, 
+                                                   verify_time_str))
                                 return
                             else:
                                 if options.verbose:
-                                    print_queue.put(obj +' [ Overwriting local %s remote %s] %s ' % \
-                                          (md5sum_file.hexdigest(), md5sum_remote,verify_time_str))
-                            
+                                    print_queue.put(obj + \
+                                                    ' [ Overwriting local %s '
+                                                    'remote %s] %s ' % \
+                                                    (md5sum_file.hexdigest(), 
+                                                    md5sum_remote,
+                                                    verify_time_str))
                                 # continue through and get the file
                     else:
                         if options.verbose:
@@ -812,8 +825,10 @@ st_upload_help = '''
 upload [options] container file_or_directory [file_or_directory] [...]
     Uploads to the given container the files and directories specified by the
     remaining args. -c or --changed is an option that will only upload files
-    that have changed since the last upload. -S <size> or --segment-size <size>
-    and --leave-segments are options as well (see --help for more).
+    that have changed since the last upload. --verified-upload will upload 
+    files where the md5 checksum does not match the remote checksum.-S <size> 
+    or --segment-size <size> and --leave-segments are options as well 
+    (see --help for more).
 '''.strip('\n')
 
 
@@ -837,10 +852,20 @@ def st_upload(parser, args, print_queue, error_queue):
     parser.add_option('', '--segment-threads', type=int,
                       default=10, help='Number of threads to use for '
                       'uploading object segments')
+    parser.add_option('--verified-upload', action='store_true', 
+                      dest='verified_upload',
+                      default=False, 
+                      help='MD5 checksums the local file and checks uploaded '
+                      'version, if they do not match local version is '
+                      'uploaded')
     (options, args) = parse_args(parser, args)
     args = args[1:]
     if len(args) < 2:
         error_queue.put('Usage: %s [options] %s' %
+                        (basename(argv[0]), st_upload_help))
+        return
+    if options.verified_upload and options.changed:
+        error_queue.put('Incompatabe options Usage: %s [options] %s' %
                         (basename(argv[0]), st_upload_help))
         return
     object_queue = Queue(10000)
@@ -851,6 +876,9 @@ def st_upload(parser, args, print_queue, error_queue):
         else:
             fp = open(job['path'], 'rb')
             fp.seek(job['segment_start'])
+            if options.verbose:
+                print_queue.put('Putting segment %s %s' % 
+                                (path ,str(segment_start)) )
             conn.put_object(job.get('container', args[0] + '_segments'),
                 job['obj'], fp, content_length=job['segment_size'])
         if options.verbose and 'log_line' in job:
@@ -889,6 +917,8 @@ def st_upload(parser, args, print_queue, error_queue):
                     except ClientException, err:
                         if err.http_status != 404:
                             raise
+                if options.verbose:
+                    print_queue.put('Changed uploading %s' % path)
                 conn.put_object(container, obj, '', content_length=0,
                                 content_type='text/directory',
                                 headers=put_headers)
@@ -950,11 +980,54 @@ def st_upload(parser, args, print_queue, error_queue):
                     if old_manifest == new_object_manifest:
                         old_manifest = None
                     put_headers['x-object-manifest'] = new_object_manifest
+                    if options.verbose:
+                        print_queue.put('Changed object uploading %s',(obj))
                     conn.put_object(container, obj, '', content_length=0,
                                     headers=put_headers)
                 else:
-                    conn.put_object(container, obj, open(path, 'rb'),
-                        content_length=getsize(path), headers=put_headers)
+                    if options.verified_upload:
+                        try:
+                            headers = conn.head_object(container, obj)
+                            md5sum_remote = headers['etag']
+                            md5sum_file = md5()
+                            localfile = open(path,'r') 
+                            read_length = 0
+                            for chunk in _read_in_chunks(localfile):
+                                read_length = len(chunk)
+                                md5sum_file.update(chunk)
+                            if md5sum_file.hexdigest() != md5sum_remote:
+                                if options.verbose:
+                                    print_queue.put('Uploading %s not verified'
+                                                    ' local %s remote %s'
+                                                    % (path,
+                                                       md5sum_file.hexdigest(),
+                                                       md5sum_remote))
+                                conn.put_object(container, obj, 
+                                                open(path, 'rb'),
+                                                content_length=getsize(path),
+                                                headers=put_headers)
+                            else:
+                                if options.verbose:
+                                    print_queue.put('Skipping %s verified %s'
+                                                    % (path,md5sum_remote))
+                        except ClientException, err:
+                            if err.http_status == 404:
+                                if options.verbose:
+                                    print_queue.put('New object uploading %s' \
+                                                     % (path))
+                                conn.put_object(container, obj, 
+                                                open(path, 'rb'),
+                                                content_length=getsize(path), 
+                                                headers=put_headers)
+                            else:
+                                raise
+                    else:
+                        if options.verbose:
+                            print_queue.put('Object upload %s' % path)
+                        conn.put_object(container, obj, open(path, 'rb'),
+                            content_length=getsize(path), headers=put_headers)
+                                
+                        
                 if old_manifest:
                     segment_queue = Queue(10000)
                     scontainer, sprefix = old_manifest.split('/', 1)
