@@ -858,13 +858,18 @@ def st_upload(parser, args, print_queue, error_queue):
                       help='MD5 checksums the local file and checks uploaded '
                       'version, if they do not match local version is '
                       'uploaded')
+    parser.add_option('--no-clobber', action='store_true', 
+                       dest='no_clobber',
+                       default=False, 
+                       help='If the file exists in the container, skip it.')
     (options, args) = parse_args(parser, args)
     args = args[1:]
     if len(args) < 2:
         error_queue.put('Usage: %s [options] %s' %
                         (basename(argv[0]), st_upload_help))
         return
-    if options.verified_upload and options.changed:
+    if (options.verified_upload or options.no_clobber and options.changed ) or\
+       (options.verified_upload and options.no_clobber):
         error_queue.put('Incompatabe options Usage: %s [options] %s' %
                         (basename(argv[0]), st_upload_help))
         return
@@ -878,7 +883,7 @@ def st_upload(parser, args, print_queue, error_queue):
             fp.seek(job['segment_start'])
             if options.verbose:
                 print_queue.put('Putting segment %s %s' % 
-                                (path ,str(segment_start)) )
+                                (path, str(segment_start)) )
             conn.put_object(job.get('container', args[0] + '_segments'),
                 job['obj'], fp, content_length=job['segment_size'])
         if options.verbose and 'log_line' in job:
@@ -985,31 +990,38 @@ def st_upload(parser, args, print_queue, error_queue):
                     conn.put_object(container, obj, '', content_length=0,
                                     headers=put_headers)
                 else:
-                    if options.verified_upload:
+                    if options.verified_upload or options.no_clobber:
                         try:
+                            # This also checks for existance as 404 raises
+                            # exception
                             headers = conn.head_object(container, obj)
-                            md5sum_remote = headers['etag']
-                            md5sum_file = md5()
-                            localfile = open(path,'r') 
-                            read_length = 0
-                            for chunk in _read_in_chunks(localfile):
-                                read_length = len(chunk)
-                                md5sum_file.update(chunk)
-                            if md5sum_file.hexdigest() != md5sum_remote:
-                                if options.verbose:
-                                    print_queue.put('Uploading %s not verified'
-                                                    ' local %s remote %s'
-                                                    % (path,
-                                                       md5sum_file.hexdigest(),
-                                                       md5sum_remote))
-                                conn.put_object(container, obj, 
-                                                open(path, 'rb'),
-                                                content_length=getsize(path),
-                                                headers=put_headers)
+                            if options.verified_upload:
+                                md5sum_remote = headers['etag']
+                                md5sum_file = md5()
+                                localfile = open(path,'r') 
+                                read_length = 0
+                                for chunk in _read_in_chunks(localfile):
+                                    read_length = len(chunk)
+                                    md5sum_file.update(chunk)
+                                if md5sum_file.hexdigest() != md5sum_remote:
+                                    if options.verbose:
+                                        print_queue.put('Uploading %s not ' \
+                                             'verified local %s remote %s'  \
+                                              % (path,
+                                                 md5sum_file.hexdigest(),
+                                                 md5sum_remote))
+                                    conn.put_object(container, obj, 
+                                         open(path, 'rb'),
+                                         content_length=getsize(path),
+                                         headers=put_headers)
+                                else:
+                                    if options.verbose: 
+                                        print_queue.put('Skipping %s verified %s'
+                                                        % (path,md5sum_remote))
                             else:
-                                if options.verbose:
-                                    print_queue.put('Skipping %s verified %s'
-                                                    % (path,md5sum_remote))
+                                if options.verbose and options.no_clobber:
+                                    print_queue.put('Skipping %s unverified' 
+                                                     % path)
                         except ClientException, err:
                             if err.http_status == 404:
                                 if options.verbose:
