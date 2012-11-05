@@ -950,7 +950,7 @@ def st_upload(parser, args, print_queue, error_queue):
                         if err.http_status != 404:
                             raise
                 if options.segment_size and \
-                        getsize(path) < options.segment_size:
+                        getsize(path) > int(options.segment_size):
                     full_size = getsize(path)
                     segment_queue = Queue(10000)
                     segment_threads = [QueueFunctionThread(segment_queue,
