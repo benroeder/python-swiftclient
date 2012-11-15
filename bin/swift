@@ -990,7 +990,7 @@ def st_upload(parser, args, print_queue, error_queue):
                         old_manifest = None
                     put_headers['x-object-manifest'] = new_object_manifest
                     if options.verbose:
-                        print_queue.put('Changed object uploading %s',(obj))
+                        print_queue.put('Changed object uploading %s'% (obj))
                     conn.put_object(container, obj, '', content_length=0,
                                     headers=put_headers)
                 else:
