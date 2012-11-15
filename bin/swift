@@ -885,7 +885,7 @@ def st_upload(parser, args, print_queue, error_queue):
             fp.seek(job['segment_start'])
             if options.verbose:
                 print_queue.put('Putting segment %s %s' % 
-                                (path, str(segment_start)) )
+                                (job['path'], job['segment_start']) )
             conn.put_object(job.get('container', args[0] + '_segments'),
                 job['obj'], fp, content_length=job['segment_size'])
         if options.verbose and 'log_line' in job:
